@@ -1,0 +1,230 @@
+# BaSyx Go full eventing example.
+#
+# A complete environment that emits CloudEvents to MQTT and Kafka on every
+# Create/Update/Delete:
+#   - aas-environment: hosts the AAS Repository and Submodel Repository APIs,
+#     imports every shell/submodel you drop into ./aas on startup, and (with the
+#     integrations enabled) writes AAS and Submodel descriptors, so it emits
+#     aas, submodel, aas-descriptor, and submodel-descriptor events.
+#   - aas-registry / submodel-registry: standalone registry APIs over the shared
+#     database; eventing is enabled so direct descriptor writes also emit events.
+#   - aas-discovery: asset-link discovery API (eventing not yet supported here).
+#   - Mosquitto (MQTT) and Redpanda (Kafka) brokers, PostgreSQL, and the
+#     configuration service (installs the schema incl. outbox patch v1.2.0).
+#
+# See ./README.md for the walkthrough. Images default to ghcr.io/bblumhofer/...
+# (built by the "Eventing Images (GHCR)" workflow). To use a different registry
+# namespace, export IMAGE_OWNER (and optionally IMAGE_TAG) or copy .env.example
+# to .env and edit it.
+
+services:
+  db:
+    container_name: eventing_full_postgres
+    image: postgres:18
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+      POSTGRES_DB: basyxTestDB
+    command: ["postgres", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d basyxTestDB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  mosquitto:
+    container_name: eventing_full_mosquitto
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -i healthcheck -W 3 >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redpanda:
+    container_name: eventing_full_redpanda
+    image: redpandadata/redpanda:v24.2.7
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --overprovisioned
+      - --node-id=0
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # Creates the Kafka topic once, so publishing never depends on broker-side
+  # auto-topic-creation defaults.
+  redpanda-init:
+    container_name: eventing_full_redpanda_init
+    image: redpandadata/redpanda:v24.2.7
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["rpk topic create basyx.events --brokers redpanda:9092 || true"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+
+  basyx_configuration:
+    container_name: eventing_full_configuration
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-configuration-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    environment:
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+    depends_on:
+      db:
+        condition: service_healthy
+
+  aas-environment:
+    container_name: eventing_full_aas_environment
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-aasenvironment-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    ports:
+      - "8081:8081"
+    environment:
+      - SERVER_PORT=8081
+      - CORS_ALLOWEDORIGINS=*
+      - CORS_ALLOWEDHEADERS=*
+      - CORS_ALLOWEDMETHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+      - ABAC_ENABLED=false
+      - GENERAL_AASREGISTRYINTEGRATION=true
+      - GENERAL_SUBMODELREGISTRYINTEGRATION=true
+      - GENERAL_DISCOVERYINTEGRATION=true
+      - GENERAL_EXTERNALURL=http://localhost:8081
+      - GENERAL_AAS_PRECONFIG_PATHS=/app/preconfiguration
+      # --- Eventing ---
+      - BASYX_EVENTING_ENABLED=true
+      - BASYX_EVENTING_OUTBOX_ENABLED=true
+      - BASYX_EVENTING_FORMAT=cloudevents
+      - BASYX_EVENTING_TOPIC_PREFIX=basyx
+      - BASYX_EVENTING_SINKS=mqtt,kafka
+      - BASYX_EVENTING_MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - BASYX_EVENTING_MQTT_CLIENT_ID=basyx-aas-environment
+      - BASYX_EVENTING_KAFKA_BROKERS=redpanda:9092
+      - BASYX_EVENTING_KAFKA_TOPIC=basyx.events
+    volumes:
+      - ./aas:/app/preconfiguration:ro
+    depends_on:
+      basyx_configuration:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  aas-registry:
+    container_name: eventing_full_aas_registry
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-aasregistry-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    ports:
+      - "8082:8082"
+    environment:
+      - SERVER_PORT=8082
+      - CORS_ALLOWEDORIGINS=*
+      - CORS_ALLOWEDHEADERS=*
+      - CORS_ALLOWEDMETHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+      - ABAC_ENABLED=false
+      - BASYX_EVENTING_ENABLED=true
+      - BASYX_EVENTING_OUTBOX_ENABLED=true
+      - BASYX_EVENTING_FORMAT=cloudevents
+      - BASYX_EVENTING_TOPIC_PREFIX=basyx
+      - BASYX_EVENTING_SINKS=mqtt,kafka
+      - BASYX_EVENTING_MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - BASYX_EVENTING_MQTT_CLIENT_ID=basyx-aas-registry
+      - BASYX_EVENTING_KAFKA_BROKERS=redpanda:9092
+      - BASYX_EVENTING_KAFKA_TOPIC=basyx.events
+    depends_on:
+      basyx_configuration:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  submodel-registry:
+    container_name: eventing_full_submodel_registry
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-submodelregistry-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    ports:
+      - "8083:8083"
+    environment:
+      - SERVER_PORT=8083
+      - CORS_ALLOWEDORIGINS=*
+      - CORS_ALLOWEDHEADERS=*
+      - CORS_ALLOWEDMETHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+      - ABAC_ENABLED=false
+      - BASYX_EVENTING_ENABLED=true
+      - BASYX_EVENTING_OUTBOX_ENABLED=true
+      - BASYX_EVENTING_FORMAT=cloudevents
+      - BASYX_EVENTING_TOPIC_PREFIX=basyx
+      - BASYX_EVENTING_SINKS=mqtt,kafka
+      - BASYX_EVENTING_MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - BASYX_EVENTING_MQTT_CLIENT_ID=basyx-submodel-registry
+      - BASYX_EVENTING_KAFKA_BROKERS=redpanda:9092
+      - BASYX_EVENTING_KAFKA_TOPIC=basyx.events
+    depends_on:
+      basyx_configuration:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  aas-discovery:
+    container_name: eventing_full_aas_discovery
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-discovery-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    ports:
+      - "8084:8084"
+    environment:
+      - SERVER_PORT=8084
+      - CORS_ALLOWEDORIGINS=*
+      - CORS_ALLOWEDHEADERS=*
+      - CORS_ALLOWEDMETHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+      - ABAC_ENABLED=false
+    depends_on:
+      basyx_configuration:
+        condition: service_completed_successfully
+    restart: unless-stopped

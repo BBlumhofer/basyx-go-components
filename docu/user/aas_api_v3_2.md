@@ -251,15 +251,24 @@ This has operational consequences:
 - If an existing entity has no history row yet, its first partial update falls back to materializing the current complete identifiable once. Later partial updates can derive snapshots from history.
 - While PostgreSQL history or WORM evidence is active, an unclassified write endpoint is rejected before its handler runs with `HISTORY-COVERAGE-UNCLASSIFIED`. This prevents a newly added endpoint from silently changing current state without recording its required mutation.
 
-Eventing placeholders:
+Eventing (transactional outbox, MQTT and Kafka):
 
 - `BASYX_EVENTING_ENABLED`
 - `BASYX_EVENTING_FORMAT`, currently expected to be `cloudevents`
-- `BASYX_EVENTING_SINKS`
-- `BASYX_EVENTING_OUTBOX_ENABLED`
+- `BASYX_EVENTING_SINKS`, comma-separated, any of `mqtt`, `kafka`
+- `BASYX_EVENTING_OUTBOX_ENABLED` (required when eventing is enabled)
 - `BASYX_EVENTING_TOPIC_PREFIX`
+- `BASYX_EVENTING_MQTT_BROKER_URL`, `BASYX_EVENTING_MQTT_CLIENT_ID`
+- `BASYX_EVENTING_KAFKA_BROKERS` (comma-separated), `BASYX_EVENTING_KAFKA_TOPIC`
 
-These settings reserve the configuration shape for future CloudEvents-compatible outbox/event publishing. MQTT and Kafka publishing are not implemented yet. Enabling eventing, configuring sinks, or enabling the outbox currently fails fast during configuration loading.
+When enabled, every acknowledged Create/Update/Delete writes a CloudEvents 1.0
+envelope to a transactional outbox inside the model transaction, and a relay
+publishes it asynchronously to the configured sinks with at-least-once delivery,
+per-entity ordering, bounded retry, and dead-lettering. Eventing is independent
+of history and WORM evidence configuration. See
+[docu/developer/eventing_concept.md](../developer/eventing_concept.md) for the
+full design and the `eventing.*` YAML block for all tuning options (relay,
+retention, MQTT QoS/TLS, Kafka acks/idempotence/SASL).
 
 Compact history storage:
 

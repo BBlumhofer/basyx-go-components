@@ -42,6 +42,7 @@ import (
 	aasrepositorydb "github.com/eclipse-basyx/basyx-go-components/internal/aasrepository/persistence"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/jws"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
@@ -145,6 +146,12 @@ func runServer(ctx context.Context, configPath string) error {
 	if err = history.ApplyPostgresGuardConfig(ctx, sharedDB); err != nil {
 		return err
 	}
+
+	eventingRelay, err := eventing.Setup(ctx, sharedDB, "submodel-repository", cfg.General.ExternalURL, cfg.Eventing)
+	if err != nil {
+		return err
+	}
+	defer eventing.ShutdownRelay(ctx, eventingRelay)
 
 	smDatabase, err := persistencepostgresql.NewSubmodelDatabaseFromDB(sharedDB, privateKey, cfg.Server.StrictVerification)
 	if err != nil {

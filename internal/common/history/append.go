@@ -74,7 +74,8 @@ import (
 //	}
 func AppendVersionTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, snapshot map[string]any, deleted bool) error {
 	cfg := ActiveConfig()
-	if cfg.Mode == ModeOff && !cfg.EvidenceEnabled {
+	recordHistory := cfg.Mode != ModeOff || cfg.EvidenceEnabled
+	if !recordHistory && !MutationEventHookActive() {
 		return nil
 	}
 
@@ -85,6 +86,15 @@ func AppendVersionTx(ctx context.Context, tx *sql.Tx, table string, identifier s
 	if err = lockIdentifierTx(ctx, tx, table, identifier); err != nil {
 		return err
 	}
+	if recordHistory {
+		if err = appendVersionRecordTx(ctx, tx, table, identifier, changeType, previousSnapshot, snapshot, deleted, cfg); err != nil {
+			return err
+		}
+	}
+	return emitMutationEventTx(ctx, tx, table, identifier, changeType, snapshot, deleted)
+}
+
+func appendVersionRecordTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, snapshot map[string]any, deleted bool, cfg Config) error {
 	if cfg.EvidenceEnabled {
 		return appendVersionWithEvidenceTx(ctx, tx, table, identifier, changeType, previousSnapshot, snapshot, deleted, cfg)
 	}
@@ -137,7 +147,8 @@ func AppendVersionTx(ctx context.Context, tx *sql.Tx, table string, identifier s
 //	}
 func AppendMutatedVersionTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, mutate SnapshotMutator) error {
 	cfg := ActiveConfig()
-	if cfg.Mode == ModeOff && !cfg.EvidenceEnabled {
+	recordHistory := cfg.Mode != ModeOff || cfg.EvidenceEnabled
+	if !recordHistory && !MutationEventHookActive() {
 		return nil
 	}
 
@@ -151,43 +162,55 @@ func AppendMutatedVersionTx(ctx context.Context, tx *sql.Tx, table string, ident
 	if err = lockIdentifierTx(ctx, tx, table, identifier); err != nil {
 		return err
 	}
-
-	if cfg.EvidenceEnabled {
-		if previousSnapshot == nil {
-			return common.NewInternalServerError("HISTORY-EVIDENCE-PREVIOUS-MISSING complete pre-mutation snapshot is required")
-		}
-		currentSnapshot, cloneErr := cloneSnapshotMap(previousSnapshot)
-		if cloneErr != nil {
-			return cloneErr
-		}
-		if err = mutate(currentSnapshot); err != nil {
-			return err
-		}
-		return appendVersionWithEvidenceTx(ctx, tx, table, identifier, changeType, previousSnapshot, currentSnapshot, false, cfg)
-	}
-
-	var mutationBase *latestVersion
-	if mutationBase == nil && cfg.Mode != ModeOff {
-		latest, latestErr := latestVersionTx(ctx, tx, table, identifier)
-		if latestErr != nil {
-			return latestErr
-		}
-		mutationBase = &latest
-	}
-	if mutationBase == nil {
-		return common.NewErrNotFound("HISTORY-MUTATE-NOBASE no prior mutation evidence is available")
-	}
-	if mutationBase.deleted {
-		return common.NewErrNotFound("HISTORY-MUTATE-DELETED latest historical version is deleted")
-	}
-	currentSnapshot, err := cloneSnapshotMap(mutationBase.snapshot)
+	currentSnapshot, err := appendMutatedRecordTx(ctx, tx, table, identifier, changeType, previousSnapshot, mutate, cfg)
 	if err != nil {
 		return err
 	}
-	if err = mutate(currentSnapshot); err != nil {
-		return err
+	return emitMutationEventTx(ctx, tx, table, identifier, changeType, currentSnapshot, false)
+}
+
+func appendMutatedRecordTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, mutate SnapshotMutator, cfg Config) (map[string]any, error) {
+	if cfg.EvidenceEnabled {
+		return appendMutatedEvidenceRecordTx(ctx, tx, table, identifier, changeType, previousSnapshot, mutate, cfg)
 	}
-	return appendVersionWithLatestTx(ctx, tx, table, identifier, changeType, currentSnapshot, false, mutationBase, cfg)
+	if cfg.Mode == ModeOff {
+		return nil, common.NewErrNotFound("HISTORY-MUTATE-NOBASE no prior mutation evidence is available")
+	}
+	latest, latestErr := latestVersionTx(ctx, tx, table, identifier)
+	if latestErr != nil {
+		return nil, latestErr
+	}
+	if latest.deleted {
+		return nil, common.NewErrNotFound("HISTORY-MUTATE-DELETED latest historical version is deleted")
+	}
+	currentSnapshot, err := cloneSnapshotMap(latest.snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if err = mutate(currentSnapshot); err != nil {
+		return nil, err
+	}
+	if err = appendVersionWithLatestTx(ctx, tx, table, identifier, changeType, currentSnapshot, false, &latest, cfg); err != nil {
+		return nil, err
+	}
+	return currentSnapshot, nil
+}
+
+func appendMutatedEvidenceRecordTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, mutate SnapshotMutator, cfg Config) (map[string]any, error) {
+	if previousSnapshot == nil {
+		return nil, common.NewInternalServerError("HISTORY-EVIDENCE-PREVIOUS-MISSING complete pre-mutation snapshot is required")
+	}
+	currentSnapshot, cloneErr := cloneSnapshotMap(previousSnapshot)
+	if cloneErr != nil {
+		return nil, cloneErr
+	}
+	if err := mutate(currentSnapshot); err != nil {
+		return nil, err
+	}
+	if err := appendVersionWithEvidenceTx(ctx, tx, table, identifier, changeType, previousSnapshot, currentSnapshot, false, cfg); err != nil {
+		return nil, err
+	}
+	return currentSnapshot, nil
 }
 
 func appendVersionWithEvidenceTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, snapshot map[string]any, deleted bool, cfg Config) error {

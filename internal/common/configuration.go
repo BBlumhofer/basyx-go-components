@@ -312,13 +312,76 @@ type HistoryIntegrityAnchorConfig struct {
 	Provider string `mapstructure:"provider" yaml:"provider" json:"provider"` // none today; immudb/Rekor/Trillian later
 }
 
-// EventingConfig reserves future-compatible eventing configuration.
+// EventingConfig configures transactional-outbox based CUD event publishing.
+//
+// Enabled is the master switch. OutboxEnabled gates the in-transaction outbox
+// insert and the asynchronous relay. Sinks selects which transports (mqtt,
+// kafka) are constructed; each selected sink must have a valid config block.
 type EventingConfig struct {
-	Enabled       bool     `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
-	Format        string   `mapstructure:"format" yaml:"format" json:"format"`
-	Sinks         []string `mapstructure:"sinks" yaml:"sinks" json:"sinks"`
-	OutboxEnabled bool     `mapstructure:"outboxEnabled" yaml:"outboxEnabled" json:"outboxEnabled"`
-	TopicPrefix   string   `mapstructure:"topicPrefix" yaml:"topicPrefix" json:"topicPrefix"`
+	Enabled       bool                    `mapstructure:"enabled" yaml:"enabled" json:"enabled"`
+	Format        string                  `mapstructure:"format" yaml:"format" json:"format"`
+	Sinks         []string                `mapstructure:"sinks" yaml:"sinks" json:"sinks"`
+	OutboxEnabled bool                    `mapstructure:"outboxEnabled" yaml:"outboxEnabled" json:"outboxEnabled"`
+	TopicPrefix   string                  `mapstructure:"topicPrefix" yaml:"topicPrefix" json:"topicPrefix"`
+	Relay         EventingRelayConfig     `mapstructure:"relay" yaml:"relay" json:"relay"`
+	Retention     EventingRetentionConfig `mapstructure:"retention" yaml:"retention" json:"retention"`
+	MQTT          EventingMQTTConfig      `mapstructure:"mqtt" yaml:"mqtt" json:"mqtt"`
+	Kafka         EventingKafkaConfig     `mapstructure:"kafka" yaml:"kafka" json:"kafka"`
+}
+
+// EventingRelayConfig tunes the asynchronous outbox relay loop.
+type EventingRelayConfig struct {
+	PollIntervalMs int `mapstructure:"pollIntervalMs" yaml:"pollIntervalMs" json:"pollIntervalMs"`
+	EntityBatch    int `mapstructure:"entityBatch" yaml:"entityBatch" json:"entityBatch"`
+	PerEntityBatch int `mapstructure:"perEntityBatch" yaml:"perEntityBatch" json:"perEntityBatch"`
+	MaxAttempts    int `mapstructure:"maxAttempts" yaml:"maxAttempts" json:"maxAttempts"`
+	BackoffBaseMs  int `mapstructure:"backoffBaseMs" yaml:"backoffBaseMs" json:"backoffBaseMs"`
+	BackoffMaxMs   int `mapstructure:"backoffMaxMs" yaml:"backoffMaxMs" json:"backoffMaxMs"`
+}
+
+// EventingRetentionConfig bounds outbox growth via periodic cleanup.
+type EventingRetentionConfig struct {
+	PublishedTTLHours  int `mapstructure:"publishedTtlHours" yaml:"publishedTtlHours" json:"publishedTtlHours"`
+	CleanupIntervalMin int `mapstructure:"cleanupIntervalMin" yaml:"cleanupIntervalMin" json:"cleanupIntervalMin"`
+	DeadLetterTTLHours int `mapstructure:"deadLetterTtlHours" yaml:"deadLetterTtlHours" json:"deadLetterTtlHours"`
+}
+
+// EventingTLSConfig holds optional mutual-TLS material for a sink.
+type EventingTLSConfig struct {
+	CAPath   string `mapstructure:"caPath" yaml:"caPath" json:"caPath"`
+	CertPath string `mapstructure:"certPath" yaml:"certPath" json:"certPath"`
+	KeyPath  string `mapstructure:"keyPath" yaml:"keyPath" json:"keyPath"`
+	Insecure bool   `mapstructure:"insecure" yaml:"insecure" json:"insecure"`
+}
+
+// EventingMQTTConfig configures the MQTT transport (Eclipse Paho, MQTT v5).
+type EventingMQTTConfig struct {
+	BrokerURL string            `mapstructure:"brokerUrl" yaml:"brokerUrl" json:"brokerUrl"`
+	ClientID  string            `mapstructure:"clientId" yaml:"clientId" json:"clientId"`
+	QoS       int               `mapstructure:"qos" yaml:"qos" json:"qos"`
+	Retained  bool              `mapstructure:"retained" yaml:"retained" json:"retained"`
+	Username  string            `mapstructure:"username" yaml:"username" json:"username"`
+	Password  string            `mapstructure:"password" yaml:"password" json:"password"`
+	TLS       EventingTLSConfig `mapstructure:"tls" yaml:"tls" json:"tls"`
+}
+
+// EventingSASLConfig holds optional Kafka SASL credentials.
+type EventingSASLConfig struct {
+	Mechanism string `mapstructure:"mechanism" yaml:"mechanism" json:"mechanism"`
+	Username  string `mapstructure:"username" yaml:"username" json:"username"`
+	Password  string `mapstructure:"password" yaml:"password" json:"password"`
+}
+
+// EventingKafkaConfig configures the Kafka transport (franz-go).
+type EventingKafkaConfig struct {
+	Brokers           []string           `mapstructure:"brokers" yaml:"brokers" json:"brokers"`
+	Topic             string             `mapstructure:"topic" yaml:"topic" json:"topic"`
+	TopicPerComponent bool               `mapstructure:"topicPerComponent" yaml:"topicPerComponent" json:"topicPerComponent"`
+	Acks              string             `mapstructure:"acks" yaml:"acks" json:"acks"`
+	Idempotent        bool               `mapstructure:"idempotent" yaml:"idempotent" json:"idempotent"`
+	Compression       string             `mapstructure:"compression" yaml:"compression" json:"compression"`
+	TLS               EventingTLSConfig  `mapstructure:"tls" yaml:"tls" json:"tls"`
+	SASL              EventingSASLConfig `mapstructure:"sasl" yaml:"sasl" json:"sasl"`
 }
 
 // SwaggerConfig contains Swagger/OpenAPI documentation configuration parameters.
@@ -828,6 +891,28 @@ func applyEventingEnvOverrides(cfg *Config) {
 	if value, ok := lookupTrimmedEnv("BASYX_EVENTING_TOPIC_PREFIX"); ok {
 		cfg.Eventing.TopicPrefix = value
 	}
+	if value, ok := lookupTrimmedEnv("BASYX_EVENTING_MQTT_BROKER_URL"); ok {
+		cfg.Eventing.MQTT.BrokerURL = value
+	}
+	if value, ok := lookupTrimmedEnv("BASYX_EVENTING_MQTT_CLIENT_ID"); ok {
+		cfg.Eventing.MQTT.ClientID = value
+	}
+	if value, ok := lookupTrimmedEnv("BASYX_EVENTING_KAFKA_BROKERS"); ok {
+		cfg.Eventing.Kafka.Brokers = parseCommaSeparated(value)
+	}
+	if value, ok := lookupTrimmedEnv("BASYX_EVENTING_KAFKA_TOPIC"); ok {
+		cfg.Eventing.Kafka.Topic = value
+	}
+}
+
+// containsFold reports whether values contains target, comparing case-insensitively.
+func containsFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateHistoryAndEventingConfig(cfg *Config) error {
@@ -933,11 +1018,51 @@ func validateIntegrityAnchorConfig(cfg HistoryIntegrityAnchorConfig) error {
 	}
 }
 
+// SupportedEventingSinks lists the transport names accepted in eventing.sinks.
+var SupportedEventingSinks = map[string]bool{"mqtt": true, "kafka": true}
+
 func validateEventingConfig(cfg EventingConfig) error {
-	if cfg.Enabled || cfg.OutboxEnabled || len(cfg.Sinks) > 0 {
-		return fmt.Errorf("CONFIG-EVENTING-NOTIMPLEMENTED eventing publishing and outbox processing are not implemented yet")
+	if !cfg.Enabled {
+		return nil
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.Format)) != "cloudevents" {
+		return fmt.Errorf("CONFIG-EVENTING-FORMAT eventing.format %q is unsupported; only \"cloudevents\" is available", cfg.Format)
+	}
+	if !cfg.OutboxEnabled {
+		return fmt.Errorf("CONFIG-EVENTING-OUTBOX eventing.enabled requires eventing.outboxEnabled")
+	}
+	if len(cfg.Sinks) == 0 {
+		return fmt.Errorf("CONFIG-EVENTING-SINKS eventing.enabled requires at least one sink in eventing.sinks")
+	}
+	for _, sink := range cfg.Sinks {
+		if err := validateEventingSink(cfg, strings.ToLower(strings.TrimSpace(sink))); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+func validateEventingSink(cfg EventingConfig, sink string) error {
+	switch sink {
+	case "mqtt":
+		if strings.TrimSpace(cfg.MQTT.BrokerURL) == "" {
+			return fmt.Errorf("CONFIG-EVENTING-MQTT-BROKER eventing.mqtt.brokerUrl is required for the mqtt sink")
+		}
+		if cfg.MQTT.QoS < 0 || cfg.MQTT.QoS > 2 {
+			return fmt.Errorf("CONFIG-EVENTING-MQTT-QOS eventing.mqtt.qos must be 0, 1, or 2")
+		}
+		return nil
+	case "kafka":
+		if len(cfg.Kafka.Brokers) == 0 {
+			return fmt.Errorf("CONFIG-EVENTING-KAFKA-BROKERS eventing.kafka.brokers is required for the kafka sink")
+		}
+		if strings.TrimSpace(cfg.Kafka.Topic) == "" {
+			return fmt.Errorf("CONFIG-EVENTING-KAFKA-TOPIC eventing.kafka.topic is required for the kafka sink")
+		}
+		return nil
+	default:
+		return fmt.Errorf("CONFIG-EVENTING-SINK-UNKNOWN eventing.sinks contains unsupported sink %q", sink)
+	}
 }
 
 func normalizeProvider(provider string) string {
@@ -1157,12 +1282,27 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("history.evidence.signing.required", DefaultConfig.HistoryEvidenceSigningRequired)
 	v.SetDefault("history.integrityAnchor.provider", DefaultConfig.HistoryIntegrityAnchorProvider)
 
-	// Eventing placeholders
+	// Eventing
 	v.SetDefault("eventing.enabled", false)
 	v.SetDefault("eventing.format", "cloudevents")
 	v.SetDefault("eventing.sinks", []string{})
 	v.SetDefault("eventing.outboxEnabled", false)
 	v.SetDefault("eventing.topicPrefix", "basyx")
+	v.SetDefault("eventing.relay.pollIntervalMs", 250)
+	v.SetDefault("eventing.relay.entityBatch", 128)
+	v.SetDefault("eventing.relay.perEntityBatch", 64)
+	v.SetDefault("eventing.relay.maxAttempts", 12)
+	v.SetDefault("eventing.relay.backoffBaseMs", 1000)
+	v.SetDefault("eventing.relay.backoffMaxMs", 60000)
+	v.SetDefault("eventing.retention.publishedTtlHours", 168)
+	v.SetDefault("eventing.retention.cleanupIntervalMin", 30)
+	v.SetDefault("eventing.retention.deadLetterTtlHours", 720)
+	v.SetDefault("eventing.mqtt.qos", 1)
+	v.SetDefault("eventing.mqtt.retained", false)
+	v.SetDefault("eventing.kafka.topic", "basyx.events")
+	v.SetDefault("eventing.kafka.acks", "all")
+	v.SetDefault("eventing.kafka.idempotent", true)
+	v.SetDefault("eventing.kafka.compression", "lz4")
 
 	// Swagger defaults
 	v.SetDefault("swagger.enabled", DefaultConfig.SwaggerEnabled)
@@ -1357,6 +1497,14 @@ func PrintConfiguration(cfg *Config) {
 		add("Sinks", cfg.Eventing.Sinks, DefaultConfig.EventingSinks)
 		add("Outbox Enabled", cfg.Eventing.OutboxEnabled, DefaultConfig.EventingOutboxEnabled)
 		add("Topic Prefix", cfg.Eventing.TopicPrefix, DefaultConfig.EventingTopicPrefix)
+		if containsFold(cfg.Eventing.Sinks, "mqtt") {
+			add("MQTT Broker", cfg.Eventing.MQTT.BrokerURL, "")
+			add("MQTT QoS", cfg.Eventing.MQTT.QoS, 1)
+		}
+		if containsFold(cfg.Eventing.Sinks, "kafka") {
+			add("Kafka Brokers", cfg.Eventing.Kafka.Brokers, []string(nil))
+			add("Kafka Topic", cfg.Eventing.Kafka.Topic, "basyx.events")
+		}
 	}
 
 	lines = append(lines, divider)
