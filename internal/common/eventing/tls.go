@@ -58,7 +58,7 @@ func buildTLSConfig(cfg common.EventingTLSConfig) (*tls.Config, error) {
 }
 
 func loadCAPool(caPath string) (*x509.CertPool, error) {
-	caBytes, err := os.ReadFile(caPath)
+	caBytes, err := os.ReadFile(caPath) //nolint:gosec // caPath is an operator-configured trust bundle
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-TLS-CAREAD " + err.Error())
 	}

@@ -72,7 +72,8 @@ func newMQTTSink(ctx context.Context, cfg common.EventingMQTTConfig) (*mqttSink,
 	if err = manager.AwaitConnection(awaitCtx); err != nil {
 		return nil, common.NewInternalServerError("EVENTING-MQTT-AWAIT " + err.Error())
 	}
-	return &mqttSink{manager: manager, qos: byte(cfg.QoS), retained: cfg.Retained}, nil
+	qos := byte(cfg.QoS) //nolint:gosec // QoS is validated to 0..2 in configuration
+	return &mqttSink{manager: manager, qos: qos, retained: cfg.Retained}, nil
 }
 
 func (s *mqttSink) Name() string { return mqttSinkName }

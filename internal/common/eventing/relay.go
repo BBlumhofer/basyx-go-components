@@ -188,3 +188,12 @@ func entityBatch(rc RuntimeConfig) int {
 	}
 	return rc.Relay.EntityBatch
 }
+
+// safeLimit converts a bounded, non-negative batch size to the uint expected by
+// the query builder without risking a negative-to-uint overflow.
+func safeLimit(n int) uint {
+	if n < 0 {
+		return 0
+	}
+	return uint(n) //nolint:gosec // n is guaranteed non-negative above
+}

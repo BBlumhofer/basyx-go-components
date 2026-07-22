@@ -177,7 +177,7 @@ func TestPerEntitySequenceIsMonotonic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var sequences []int64
 	for rows.Next() {
 		var seq int64

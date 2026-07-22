@@ -56,7 +56,7 @@ func (r *Relay) claimEntities(ctx context.Context) ([]string, error) {
 		Where(goqu.Ex{"status": "pending"}, goqu.L("next_attempt_at <= NOW()")).
 		GroupBy("identifier_digest").
 		Order(goqu.L("MIN(id)").Asc()).
-		Limit(uint(entityBatch(r.rc))).
+		Limit(safeLimit(entityBatch(r.rc))).
 		ToSQL()
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-CLAIM-BUILD " + err.Error())
@@ -65,7 +65,7 @@ func (r *Relay) claimEntities(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-CLAIM-EXEC " + err.Error())
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var digests []string
 	for rows.Next() {
 		var digest string
@@ -135,7 +135,7 @@ func loadPendingRows(ctx context.Context, tx *sql.Tx, digest string, limit int) 
 		Select("id", "event_id", "component", "topic", "partition_key", "content_type", "payload", "pending_sinks", "attempts").
 		Where(goqu.Ex{"identifier_digest": digest, "status": "pending"}).
 		Order(goqu.C("id").Asc()).
-		Limit(uint(limit)).
+		Limit(safeLimit(limit)).
 		ToSQL()
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-LOAD-BUILD " + err.Error())
@@ -144,7 +144,7 @@ func loadPendingRows(ctx context.Context, tx *sql.Tx, digest string, limit int) 
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-LOAD-EXEC " + err.Error())
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanOutboxRows(rows)
 }
 

@@ -50,7 +50,7 @@ import (
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
-	persistence "github.com/eclipse-basyx/basyx-go-components/internal/submodelrepository/persistence"
+	"github.com/eclipse-basyx/basyx-go-components/internal/submodelrepository/persistence"
 )
 
 const (

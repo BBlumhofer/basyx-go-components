@@ -43,7 +43,7 @@ import (
 	persistencepostgresql "github.com/eclipse-basyx/basyx-go-components/internal/aasrepository/persistence"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
-	eventing "github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/jws"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
