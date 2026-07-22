@@ -1,0 +1,96 @@
+name: Eventing Images (GHCR)
+
+# Builds the eventing-enabled BaSyx service images and the configuration service
+# and pushes them to this repository's GitHub Container Registry (GHCR) namespace
+# using the built-in GITHUB_TOKEN. No external registry secrets are required.
+#
+# Run it from the Actions tab (workflow_dispatch) or on pushes to the eventing
+# branch. Images are published as:
+#   ghcr.io/<owner>/basyx-<service>-go:<tag>
+# where <tag> includes 'eventing', the short commit SHA, and the branch name.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/eventing-mqtt-kafka-concept-dwwqxp
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'database/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/eventing-images.yml'
+
+concurrency:
+  group: eventing-images-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 7
+      matrix:
+        service:
+          - name: basyxconfigurationservice
+            image: basyx-configuration-go
+          - name: submodelrepositoryservice
+            image: basyx-submodelrepository-go
+          - name: aasrepositoryservice
+            image: basyx-aasrepository-go
+          - name: conceptdescriptionrepositoryservice
+            image: basyx-conceptdescriptionrepository-go
+          - name: aasregistryservice
+            image: basyx-aasregistry-go
+          - name: submodelregistryservice
+            image: basyx-submodelregistry-go
+          - name: aasenvironmentservice
+            image: basyx-aasenvironment-go
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Compute lowercase owner
+        id: owner
+        run: echo "lc=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@902fa8ec7d6ecbf8d84d538b9b233a880e428804 # v5.7.0
+        with:
+          images: ghcr.io/${{ steps.owner.outputs.lc }}/${{ matrix.service.image }}
+          tags: |
+            type=raw,value=eventing
+            type=sha,format=short
+            type=ref,event=branch
+
+      - name: Build and push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: cmd/${{ matrix.service.name }}/Dockerfile
+          # Add linux/arm64 here for Apple Silicon-native images (slower build).
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service.name }}
