@@ -73,3 +73,13 @@ CREATE INDEX IF NOT EXISTS ix_event_outbox_entity
 CREATE INDEX IF NOT EXISTS ix_event_outbox_cleanup
   ON event_outbox (published_at)
   WHERE status = 'published';
+
+UPDATE basyxsystem
+SET schema_version = 'v1.2.0',
+    state = 'clean'
+WHERE identifier = (
+  SELECT identifier
+  FROM basyxsystem
+  ORDER BY identifier ASC
+  LIMIT 1
+);
