@@ -12,8 +12,10 @@
 #   - Mosquitto (MQTT) and Redpanda (Kafka) brokers, PostgreSQL, and the
 #     configuration service (installs the schema incl. outbox patch v1.2.0).
 #
-# See ./README.md for the walkthrough. Images come from ghcr.io/${IMAGE_OWNER}/...
-# (build them with the "Eventing Images (GHCR)" workflow first).
+# See ./README.md for the walkthrough. Images default to ghcr.io/bblumhofer/...
+# (built by the "Eventing Images (GHCR)" workflow). To use a different registry
+# namespace, export IMAGE_OWNER (and optionally IMAGE_TAG) or copy .env.example
+# to .env and edit it.
 
 services:
   db:
@@ -69,7 +71,7 @@ services:
 
   basyx_configuration:
     container_name: eventing_full_configuration
-    image: ghcr.io/${IMAGE_OWNER}/basyx-configuration-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-configuration-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     environment:
       - POSTGRES_HOST=db
@@ -83,7 +85,7 @@ services:
 
   aas-environment:
     container_name: eventing_full_aas_environment
-    image: ghcr.io/${IMAGE_OWNER}/basyx-aasenvironment-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-aasenvironment-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     ports:
       - "8081:8081"
@@ -126,7 +128,7 @@ services:
 
   aas-registry:
     container_name: eventing_full_aas_registry
-    image: ghcr.io/${IMAGE_OWNER}/basyx-aasregistry-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-aasregistry-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     ports:
       - "8082:8082"
@@ -161,7 +163,7 @@ services:
 
   submodel-registry:
     container_name: eventing_full_submodel_registry
-    image: ghcr.io/${IMAGE_OWNER}/basyx-submodelregistry-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-submodelregistry-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     ports:
       - "8083:8083"
@@ -196,7 +198,7 @@ services:
 
   aas-discovery:
     container_name: eventing_full_aas_discovery
-    image: ghcr.io/${IMAGE_OWNER}/basyx-discovery-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-discovery-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     ports:
       - "8084:8084"

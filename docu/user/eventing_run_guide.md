@@ -70,17 +70,14 @@ New GHCR packages are **private** by default. Either:
 
 ## 3. Configure the example
 
+The compose file defaults to `ghcr.io/bblumhofer/...:eventing`, so on this fork
+no configuration is needed. To point at a different registry namespace or tag:
+
 ```sh
 cd examples/BaSyxEventingExample
-# Set IMAGE_OWNER to your GitHub owner (lowercase). IMAGE_TAG defaults to "eventing".
-$EDITOR .env
-```
-
-`.env`:
-
-```env
-IMAGE_OWNER=<your-github-owner-lowercase>
-IMAGE_TAG=eventing
+export IMAGE_OWNER=<your-github-owner-lowercase>   # optional
+export IMAGE_TAG=eventing                          # optional
+# or: cp .env.example .env && $EDITOR .env
 ```
 
 ---

@@ -31,7 +31,11 @@ writes its descriptors and asset links — producing descriptor events too.
    workflow (it builds every service used here, including `basyx-discovery-go`).
 2. Make the GHCR packages pullable (public, or `docker login ghcr.io`). See the
    [run guide](../../docu/user/eventing_run_guide.md#2-build-and-publish-the-images-github-actions--ghcr).
-3. Set `IMAGE_OWNER` in [.env](./.env) to your GitHub owner (lowercase).
+
+The compose file defaults to `ghcr.io/bblumhofer/...:eventing`, so no extra setup
+is needed for this fork. To use a different registry namespace or tag, either
+`export IMAGE_OWNER=<owner>` (and optionally `IMAGE_TAG`) or copy
+[`.env.example`](./.env.example) to `.env` and edit it.
 
 ## 1. Drop your models
 

@@ -5,7 +5,7 @@
 # outbox patch v1.2.0), and a Submodel Repository with eventing enabled to both
 # MQTT and Kafka. See docu/user/eventing_run_guide.md for the full walkthrough.
 #
-# Images are pulled from ghcr.io/${IMAGE_OWNER}/... — build them first with the
+# Images are pulled from ghcr.io/${IMAGE_OWNER:-bblumhofer}/... — build them first with the
 # "Eventing Images (GHCR)" GitHub Actions workflow, or `docker compose build`
 # is not used here because the images are prebuilt in GHCR.
 
@@ -63,7 +63,7 @@ services:
 
   basyx_configuration:
     container_name: eventing_configuration
-    image: ghcr.io/${IMAGE_OWNER}/basyx-configuration-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-configuration-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     environment:
       - POSTGRES_HOST=db
@@ -77,7 +77,7 @@ services:
 
   submodel-repository:
     container_name: eventing_submodel_repository
-    image: ghcr.io/${IMAGE_OWNER}/basyx-submodelrepository-go:${IMAGE_TAG}
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-submodelrepository-go:${IMAGE_TAG:-eventing}
     pull_policy: always
     ports:
       - "8081:8081"
