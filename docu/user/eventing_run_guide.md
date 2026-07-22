@@ -7,6 +7,11 @@ Update, and Delete. It is meant to be copy-pasteable end to end.
 
 Design background: [eventing_concept.md](../developer/eventing_concept.md).
 
+> Want the full multi-service environment (AAS + Submodel repositories,
+> registries, discovery) with a drop-in `aas/` folder for shells and submodels?
+> See [examples/BaSyxEventingFullExample](../../examples/BaSyxEventingFullExample).
+> This guide covers the single-service starter.
+
 ---
 
 ## 1. Prerequisites

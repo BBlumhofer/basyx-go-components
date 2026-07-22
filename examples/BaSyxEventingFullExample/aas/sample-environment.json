@@ -1,0 +1,37 @@
+{
+  "assetAdministrationShells": [
+    {
+      "id": "https://example.com/ids/aas/eventing-demo",
+      "idShort": "EventingDemoAAS",
+      "modelType": "AssetAdministrationShell",
+      "assetInformation": {
+        "assetKind": "Instance",
+        "globalAssetId": "https://example.com/ids/asset/eventing-demo"
+      },
+      "submodels": [
+        {
+          "type": "ModelReference",
+          "keys": [
+            { "type": "Submodel", "value": "https://example.com/ids/sm/eventing-demo" }
+          ]
+        }
+      ]
+    }
+  ],
+  "submodels": [
+    {
+      "id": "https://example.com/ids/sm/eventing-demo",
+      "idShort": "EventingDemo",
+      "modelType": "Submodel",
+      "submodelElements": [
+        {
+          "idShort": "Temperature",
+          "modelType": "Property",
+          "valueType": "xs:double",
+          "value": "21.5"
+        }
+      ]
+    }
+  ],
+  "conceptDescriptions": []
+}
