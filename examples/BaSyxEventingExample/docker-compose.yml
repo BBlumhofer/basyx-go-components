@@ -51,7 +51,6 @@ services:
       - --check=false
       - --kafka-addr=PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr=PLAINTEXT://redpanda:9092
-      - --set=redpanda.auto_create_topics_enabled=true
     ports:
       - "9092:9092"
     healthcheck:
@@ -60,6 +59,18 @@ services:
       timeout: 5s
       retries: 20
     restart: unless-stopped
+
+  # Creates the Kafka topic once, so publishing never depends on broker-side
+  # auto-topic-creation defaults.
+  redpanda-init:
+    container_name: eventing_redpanda_init
+    image: redpandadata/redpanda:v24.2.7
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["rpk topic create basyx.events --brokers redpanda:9092 || true"]
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: "no"
 
   basyx_configuration:
     container_name: eventing_configuration
@@ -110,6 +121,6 @@ services:
         condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
-      redpanda:
-        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
     restart: unless-stopped

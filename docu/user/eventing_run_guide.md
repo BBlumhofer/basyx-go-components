@@ -295,8 +295,8 @@ Then set `IMAGE_OWNER=local` in `.env` and `docker compose up -d`.
   first and reach `v1.2.0` (it installs `database/patches/1_2_0.sql`). Confirm with
   `docker compose logs basyx_configuration` and
   `docker exec -it eventing_postgres psql -U admin -d basyxTestDB -c "SELECT schema_version,state FROM basyxsystem;"`.
-- **No Kafka records.** Ensure the topic exists — Redpanda auto-creates it here via
-  `auto_create_topics_enabled=true`; otherwise create it with
+- **No Kafka records.** The `redpanda-init` service creates `basyx.events` on
+  startup. If it is missing, create it with
   `docker exec -it eventing_redpanda rpk topic create basyx.events`.
 - **`docker pull` denied for ghcr.io.** The package is private; make it public or
   `docker login ghcr.io` (see §2).

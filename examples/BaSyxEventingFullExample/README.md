@@ -141,8 +141,8 @@ docker compose up -d   # re-installs schema and re-imports ./aas
 - **`aas-discovery` produces no events.** Discovery does not yet route writes
   through the eventing mutation seam; it is included for a complete environment.
   Shell/submodel and descriptor events are unaffected.
-- **No Kafka records.** Redpanda auto-creates `basyx.events`
-  (`auto_create_topics_enabled=true`); otherwise
+- **No Kafka records.** The `redpanda-init` service creates `basyx.events` on
+  startup. If it is missing, create it manually:
   `docker exec -it eventing_full_redpanda rpk topic create basyx.events`.
 - **Schema version mismatch.** Every service requires schema `v1.2.0`; the
   configuration service installs it first. All service images must be built from
