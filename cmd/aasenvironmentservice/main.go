@@ -45,6 +45,7 @@ import (
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/asyncbulk"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
+	eventing "github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/jws"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
@@ -131,6 +132,12 @@ func runServer(ctx context.Context, configPath string) error {
 	if err != nil {
 		return err
 	}
+
+	eventingRelay, err := eventing.Setup(ctx, sharedDB, "aas-environment", cfg.General.ExternalURL, cfg.Eventing)
+	if err != nil {
+		return err
+	}
+	defer eventing.ShutdownRelay(ctx, eventingRelay)
 
 	var privateKey *rsa.PrivateKey
 	if cfg.JWS.PrivateKeyPath != "" {

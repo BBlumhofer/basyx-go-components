@@ -38,6 +38,7 @@ import (
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/asyncbulk"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
+	eventing "github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/security/abacpolicy"
@@ -112,6 +113,12 @@ func runServer(ctx context.Context, configPath string) error {
 	if err = history.ApplyPostgresGuardConfig(ctx, sharedDB); err != nil {
 		return err
 	}
+
+	eventingRelay, err := eventing.Setup(ctx, sharedDB, "submodel-registry", cfg.General.ExternalURL, cfg.Eventing)
+	if err != nil {
+		return err
+	}
+	defer eventing.ShutdownRelay(ctx, eventingRelay)
 	smDatabase, err := smregistrypostgresql.NewPostgreSQLSMBackendFromDB(sharedDB)
 	if err != nil {
 		log.Printf("❌ DB init failed: %v", err)

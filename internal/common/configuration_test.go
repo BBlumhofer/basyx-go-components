@@ -830,3 +830,42 @@ func TestValidateHistoryAndEventingConfigRejectsUnsupportedFeatures(t *testing.T
 		})
 	}
 }
+
+func TestValidateEventingConfigAcceptsCompleteSinks(t *testing.T) {
+	cfg := EventingConfig{
+		Enabled:       true,
+		OutboxEnabled: true,
+		Format:        "cloudevents",
+		TopicPrefix:   "basyx",
+		Sinks:         []string{"mqtt", "kafka"},
+		MQTT:          EventingMQTTConfig{BrokerURL: "tls://broker:8883", QoS: 1},
+		Kafka:         EventingKafkaConfig{Brokers: []string{"kafka:9092"}, Topic: "basyx.events"},
+	}
+	if err := validateEventingConfig(cfg); err != nil {
+		t.Fatalf("expected complete eventing config to validate, got %v", err)
+	}
+}
+
+func TestValidateEventingConfigRejectsIncompleteSinks(t *testing.T) {
+	tests := map[string]EventingConfig{
+		"outbox disabled": {Enabled: true, Format: "cloudevents", Sinks: []string{"mqtt"}, MQTT: EventingMQTTConfig{BrokerURL: "tls://b:8883"}},
+		"no sinks":        {Enabled: true, OutboxEnabled: true, Format: "cloudevents"},
+		"bad format":      {Enabled: true, OutboxEnabled: true, Format: "avro", Sinks: []string{"mqtt"}},
+		"mqtt no broker":  {Enabled: true, OutboxEnabled: true, Format: "cloudevents", Sinks: []string{"mqtt"}},
+		"kafka no broker": {Enabled: true, OutboxEnabled: true, Format: "cloudevents", Sinks: []string{"kafka"}},
+		"unknown sink":    {Enabled: true, OutboxEnabled: true, Format: "cloudevents", Sinks: []string{"amqp"}},
+	}
+	for name, cfg := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := validateEventingConfig(cfg); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateEventingConfigDisabledIsAlwaysValid(t *testing.T) {
+	if err := validateEventingConfig(EventingConfig{Enabled: false, Sinks: []string{"amqp"}}); err != nil {
+		t.Fatalf("disabled eventing must validate, got %v", err)
+	}
+}

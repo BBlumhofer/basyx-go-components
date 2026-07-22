@@ -1,8 +1,30 @@
 # Eventing Concept: Transactional CUD Event Publishing (MQTT + Kafka)
 
-Status: Concept / Design proposal
+Status: Implemented (`internal/common/eventing`), disabled by default
 Scope: Issue #188 — Eventing for CUD Operations
 Related: PR #502 (history-independent WORM evidence), `internal/common/history`
+
+## Implementation status
+
+The design below is implemented in `internal/common/eventing` and wired into the
+in-scope services (AAS/Submodel/Concept-Description repositories, AAS/Submodel
+registries, and the combined AAS environment) at the shared `history` mutation
+seam. Highlights:
+
+- Outbox table + per-entity sequence: `database/patches/1_2_0.sql` (schema `v1.2.0`).
+- In-transaction capture via `history.RegisterMutationEventHook` — no transport
+  logic in persistence code, and `MutationRecordingEnabled()` is eventing-aware so
+  complete resources are materialized even with history and evidence off.
+- Relay with per-entity advisory-lock ordering, bounded retry, dead-lettering,
+  retention cleanup, and in-process metrics.
+- MQTT (Eclipse Paho, MQTT v5) and Kafka (franz-go) sinks behind one interface.
+- Config `eventing.*` fully validated (replacing the former fail-fast guard).
+
+Known limitation: Discovery and the Registry-of-Infrastructures services do not
+route writes through the `history` mutation seam today, so they are not yet
+covered. Adding them is a follow-up that either routes their writes through the
+seam or calls the same enqueue hook directly; no change to the pipeline below is
+required.
 
 ---
 

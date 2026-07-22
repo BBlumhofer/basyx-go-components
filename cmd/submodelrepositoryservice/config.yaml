@@ -62,3 +62,31 @@ general:
 #   contactName: "Eclipse BaSyx"
 #   contactEmail: "basyx-dev@eclipse.org"
 #   contactUrl: "https://basyx.org"
+
+# Transactional-outbox CUD eventing (disabled by default). See
+# docu/developer/eventing_concept.md for the full design and all options.
+# eventing:
+#   enabled: true
+#   outboxEnabled: true          # required when enabled
+#   format: cloudevents
+#   topicPrefix: basyx
+#   sinks: ["mqtt", "kafka"]      # any of: mqtt, kafka
+#   relay:
+#     pollIntervalMs: 250
+#     maxAttempts: 12
+#     backoffBaseMs: 1000
+#     backoffMaxMs: 60000
+#   retention:
+#     publishedTtlHours: 168
+#     deadLetterTtlHours: 720
+#   mqtt:
+#     brokerUrl: "tls://broker:8883"
+#     clientId: "basyx-submodel-repository"
+#     qos: 1
+#     retained: false
+#   kafka:
+#     brokers: ["kafka-1:9092", "kafka-2:9092"]
+#     topic: "basyx.events"
+#     acks: all
+#     idempotent: true
+#     compression: lz4
