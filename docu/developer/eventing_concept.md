@@ -8,8 +8,8 @@ Related: PR #502 (history-independent WORM evidence), `internal/common/history`
 
 The design below is implemented in `internal/common/eventing` and wired into the
 in-scope services (AAS/Submodel/Concept-Description repositories, AAS/Submodel
-registries, and the combined AAS environment) at the shared `history` mutation
-seam. Highlights:
+registries, the combined AAS environment, and Discovery) at the shared `history`
+mutation seam. Highlights:
 
 - Outbox table + per-entity sequence: `database/patches/1_2_0.sql` (schema `v1.2.0`).
 - In-transaction capture via `history.RegisterMutationEventHook` — no transport
@@ -20,11 +20,19 @@ seam. Highlights:
 - MQTT (Eclipse Paho, MQTT v5) and Kafka (franz-go) sinks behind one interface.
 - Config `eventing.*` fully validated (replacing the former fail-fast guard).
 
-Known limitation: Discovery and the Registry-of-Infrastructures services do not
-route writes through the `history` mutation seam today, so they are not yet
-covered. Adding them is a follow-up that either routes their writes through the
-seam or calls the same enqueue hook directly; no change to the pipeline below is
+Known limitation: the Registry-of-Infrastructures service does not route writes
+through the eventing seam today, so it is not yet covered. Adding it is a
+follow-up that either routes its writes through `history.AppendVersionTx` or
+calls `history.EmitMutationEventTx` directly; no change to the pipeline below is
 required.
+
+Discovery's asset-link CUD (`CreateAllAssetLinks`, `AddAllAssetLinks`,
+`DeleteAllAssetLinks`) now emits `asset-link` events too. Asset links are a
+lookup index, not a versioned Identifiable resource, so they are captured via
+the new `history.EmitMutationEventTx` — a version of `AppendVersionTx` with the
+PostgreSQL history/evidence branch removed — rather than `AppendVersionTx`
+itself, since they have no backing history table (`history.TableAssetLink` is
+eventing-only, see `internal/common/history/types.go`).
 
 ---
 
