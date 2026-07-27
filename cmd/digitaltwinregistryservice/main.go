@@ -40,6 +40,7 @@ import (
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/asyncbulk"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
 	auth "github.com/eclipse-basyx/basyx-go-components/internal/common/security"
@@ -121,6 +122,12 @@ func runServer(ctx context.Context, configPath string) error {
 	if err = history.ApplyPostgresGuardConfig(ctx, sharedDB); err != nil {
 		return err
 	}
+
+	eventingRelay, err := eventing.Setup(ctx, sharedDB, "digital-twin-registry", cfg.General.ExternalURL, cfg.Eventing)
+	if err != nil {
+		return err
+	}
+	defer eventing.ShutdownRelay(ctx, eventingRelay)
 
 	registryDatabase, err := registrydb.NewPostgreSQLAASRegistryDatabaseFromDB(sharedDB, cfg.Server.CacheEnabled)
 	if err != nil {

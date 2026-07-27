@@ -22,9 +22,13 @@ seam. Highlights:
 
 Known limitation: Discovery and the Registry-of-Infrastructures services do not
 route writes through the `history` mutation seam today, so they are not yet
-covered. Adding them is a follow-up that either routes their writes through the
-seam or calls the same enqueue hook directly; no change to the pipeline below is
-required.
+covered. `digitaltwinregistryservice` (Registry API + Discovery API combined) is
+now wired for eventing and emits `aas-descriptor`/`submodel-descriptor` events via
+the same seam as `aasregistryservice`, but its asset-link writes go through the
+same uncovered discovery persistence path, so asset-link events are still
+missing there too. Adding full discovery coverage is a follow-up that either
+routes those writes through the seam or calls the same enqueue hook directly; no
+change to the pipeline below is required.
 
 ---
 
