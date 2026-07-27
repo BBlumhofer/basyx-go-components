@@ -53,3 +53,6 @@ logs/
 internal/aasenvironment/integration_tests/testdata_results/
 
 .cache/
+
+# Claude Code local agent worktrees and session state
+.claude/
