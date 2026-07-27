@@ -16,6 +16,7 @@ and for a single-service starter see [../BaSyxEventingExample](../BaSyxEventingE
 | aas-registry | 8082 | ✅ | AAS descriptor registry API |
 | submodel-registry | 8083 | ✅ | Submodel descriptor registry API |
 | aas-discovery | 8084 | ➖ | Asset-link discovery API (eventing not yet supported here) |
+| digital-twin-registry | 8085 | ✅ | Combined AAS Registry + Discovery API (descriptor events only — see open discovery-eventing work) |
 | Mosquitto | 1883 | — | MQTT broker |
 | Redpanda | 9092 | — | Kafka broker |
 | PostgreSQL | — | — | Shared model store + transactional outbox |
@@ -85,6 +86,7 @@ Endpoints (all share the same model store):
 | AAS descriptors | `http://localhost:8082/shell-descriptors` |
 | Submodel descriptors | `http://localhost:8083/submodel-descriptors` |
 | Asset-link discovery | `http://localhost:8084/lookup/shells` |
+| Digital Twin Registry — AAS descriptors | `http://localhost:8085/shell-descriptors` |
 
 Create a submodel (emits `basyx/aas-environment/submodel/created`):
 
