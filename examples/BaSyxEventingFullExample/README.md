@@ -15,8 +15,8 @@ and for a single-service starter see [../BaSyxEventingExample](../BaSyxEventingE
 | aas-environment | 8081 | ✅ | AAS Repository + Submodel Repository APIs, `./aas` import, upload; emits `aas`, `submodel`, `aas-descriptor`, `submodel-descriptor` events |
 | aas-registry | 8082 | ✅ | AAS descriptor registry API |
 | submodel-registry | 8083 | ✅ | Submodel descriptor registry API |
-| aas-discovery | 8084 | ➖ | Asset-link discovery API (eventing not yet supported here) |
-| digital-twin-registry | 8085 | ✅ | Combined AAS Registry + Discovery API (descriptor events only — see open discovery-eventing work) |
+| aas-discovery | 8084 | ✅ | Asset-link discovery API; emits `asset-link` events on create/add/delete |
+| digital-twin-registry | 8085 | ✅ | Combined AAS Registry + Discovery API; emits both descriptor and `asset-link` events |
 | Mosquitto | 1883 | — | MQTT broker |
 | Redpanda | 9092 | — | Kafka broker |
 | PostgreSQL | — | — | Shared model store + transactional outbox |
@@ -72,6 +72,7 @@ basyx/aas-environment/aas/created
 basyx/aas-environment/submodel/created
 basyx/aas-environment/aas-descriptor/created
 basyx/aas-environment/submodel-descriptor/created
+basyx/aas-discovery/asset-link/created
 ```
 
 ## 4. Interact
@@ -87,6 +88,7 @@ Endpoints (all share the same model store):
 | Submodel descriptors | `http://localhost:8083/submodel-descriptors` |
 | Asset-link discovery | `http://localhost:8084/lookup/shells` |
 | Digital Twin Registry — AAS descriptors | `http://localhost:8085/shell-descriptors` |
+| Digital Twin Registry — asset-link discovery | `http://localhost:8085/lookup/shells` |
 
 Create a submodel (emits `basyx/aas-environment/submodel/created`):
 
@@ -106,6 +108,16 @@ curl -sS -X POST http://localhost:8081/shells \
   -H 'Content-Type: application/json' \
   -d '{"id":"'"$AAS_ID"'","idShort":"RuntimeDemoAAS","modelType":"AssetAdministrationShell",
        "assetInformation":{"assetKind":"Instance","globalAssetId":"https://example.com/ids/asset/runtime-demo"}}'
+```
+
+Create an asset link for a shell (emits `basyx/aas-discovery/asset-link/created`):
+
+```sh
+AAS_ID_B64=$(printf '%s' "$AAS_ID" | base64 | tr '+/' '-_' | tr -d '=')
+
+curl -sS -X POST "http://localhost:8084/lookup/shells/$AAS_ID_B64" \
+  -H 'Content-Type: application/json' \
+  -d '[{"name":"globalAssetId","value":"https://example.com/ids/asset/runtime-demo"}]'
 ```
 
 Update / delete (identifiers are base64url-encoded in the path):
@@ -140,9 +152,9 @@ docker compose up -d   # re-installs schema and re-imports ./aas
 - **A service exits on startup with an eventing error.** The MQTT/Kafka sinks
   connect eagerly; ensure `mosquitto` and `redpanda` are healthy first
   (`docker compose ps`). The compose file already waits on their health.
-- **`aas-discovery` produces no events.** Discovery does not yet route writes
-  through the eventing mutation seam; it is included for a complete environment.
-  Shell/submodel and descriptor events are unaffected.
+- **Registry-of-Infrastructures still produces no events.** That component is not
+  part of this example and remains uncovered; `aas-discovery` asset-link events
+  are unaffected.
 - **No Kafka records.** The `redpanda-init` service creates `basyx.events` on
   startup. If it is missing, create it manually:
   `docker exec -it eventing_full_redpanda rpk topic create basyx.events`.

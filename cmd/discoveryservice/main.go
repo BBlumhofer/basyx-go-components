@@ -36,6 +36,7 @@ import (
 
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/binarycontent"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/eventing"
 	commonmodel "github.com/eclipse-basyx/basyx-go-components/internal/common/model"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/security/abacpolicy"
 	"github.com/eclipse-basyx/basyx-go-components/internal/discoveryservice/api"
@@ -99,6 +100,13 @@ func runServer(ctx context.Context, configPath string) error {
 	if cfg.Postgres.ConnMaxLifetimeMinutes > 0 {
 		sharedDB.SetConnMaxLifetime(time.Duration(cfg.Postgres.ConnMaxLifetimeMinutes) * time.Minute)
 	}
+
+	eventingRelay, err := eventing.Setup(ctx, sharedDB, "aas-discovery", cfg.General.ExternalURL, cfg.Eventing)
+	if err != nil {
+		return err
+	}
+	defer eventing.ShutdownRelay(ctx, eventingRelay)
+
 	smDatabase, err := persistencepostgresql.NewPostgreSQLDiscoveryBackendFromDB(sharedDB)
 	if err != nil {
 		log.Printf("❌ DB init failed: %v", err)

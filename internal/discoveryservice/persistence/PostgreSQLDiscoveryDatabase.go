@@ -43,6 +43,7 @@ import (
 	"github.com/doug-martin/goqu/v9"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/descriptors"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/model"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/model/grammar"
 	auth "github.com/eclipse-basyx/basyx-go-components/internal/common/security"
@@ -143,25 +144,31 @@ func (p *PostgreSQLDiscoveryDatabase) GetAllAssetLinks(ctx context.Context, aasI
 // Returns:
 //   - error: ErrNotFound if the AAS identifier doesn't exist, or InternalServerError on database failures
 //
-// The deletion is performed atomically. If the AAS identifier is not found (no rows affected),
-// an ErrNotFound error is returned.
+// The deletion, and the eventing capture that reports it, run inside one
+// transaction (via descriptors.WithTx) so a failure after the delete rolls
+// back both the row removal and any outbox row - the deletion is atomic.
 func (p *PostgreSQLDiscoveryDatabase) DeleteAllAssetLinks(ctx context.Context, aasID string) error {
-	d := goqu.Dialect("postgres")
-	sqlStr, args, err := d.Delete("aas_identifier").
-		Where(goqu.C("aasid").Eq(aasID)).
-		ToSQL()
-	if err != nil {
-		_, _ = fmt.Println("DeleteAllAssetLinks: build error:", err)
-		return common.NewInternalServerError("Failed to delete AAS identifier. See console for information.")
-	}
-	result, err := p.db.ExecContext(ctx, sqlStr, args...)
-	if err != nil {
-		return common.NewInternalServerError("Failed to delete AAS identifier. See console for information.")
-	}
-	if rows, _ := result.RowsAffected(); rows == 0 {
-		return common.NewErrNotFound(fmt.Sprintf("AAS identifier %s not found. See console for information.", aasID))
-	}
-	return nil
+	return descriptors.WithTx(ctx, p.db, func(tx *sql.Tx) error {
+		d := goqu.Dialect("postgres")
+		sqlStr, args, err := d.Delete("aas_identifier").
+			Where(goqu.C("aasid").Eq(aasID)).
+			ToSQL()
+		if err != nil {
+			_, _ = fmt.Println("DeleteAllAssetLinks: build error:", err)
+			return common.NewInternalServerError("Failed to delete AAS identifier. See console for information.")
+		}
+		result, err := tx.ExecContext(ctx, sqlStr, args...)
+		if err != nil {
+			return common.NewInternalServerError("Failed to delete AAS identifier. See console for information.")
+		}
+		if rows, _ := result.RowsAffected(); rows == 0 {
+			return common.NewErrNotFound(fmt.Sprintf("AAS identifier %s not found. See console for information.", aasID))
+		}
+		// The deletion representation is the documented {id, entityType, deleted}
+		// shape built by the eventing package itself for deleted=true, so no
+		// snapshot needs to be constructed here.
+		return history.EmitMutationEventTx(ctx, tx, history.TableAssetLink, aasID, history.ChangeDeleted, nil, true)
+	})
 }
 
 // CreateAllAssetLinks creates or updates an AAS identifier with its associated asset links.

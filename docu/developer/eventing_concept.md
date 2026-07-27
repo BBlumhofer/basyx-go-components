@@ -8,8 +8,8 @@ Related: PR #502 (history-independent WORM evidence), `internal/common/history`
 
 The design below is implemented in `internal/common/eventing` and wired into the
 in-scope services (AAS/Submodel/Concept-Description repositories, AAS/Submodel
-registries, and the combined AAS environment) at the shared `history` mutation
-seam. Highlights:
+registries, the combined AAS environment, Discovery, and the Digital Twin
+Registry) at the shared `history` mutation seam. Highlights:
 
 - Outbox table + per-entity sequence: `database/patches/1_2_0.sql` (schema `v1.2.0`).
 - In-transaction capture via `history.RegisterMutationEventHook` — no transport
@@ -20,15 +20,34 @@ seam. Highlights:
 - MQTT (Eclipse Paho, MQTT v5) and Kafka (franz-go) sinks behind one interface.
 - Config `eventing.*` fully validated (replacing the former fail-fast guard).
 
-Known limitation: Discovery and the Registry-of-Infrastructures services do not
-route writes through the `history` mutation seam today, so they are not yet
-covered. `digitaltwinregistryservice` (Registry API + Discovery API combined) is
-now wired for eventing and emits `aas-descriptor`/`submodel-descriptor` events via
-the same seam as `aasregistryservice`, but its asset-link writes go through the
-same uncovered discovery persistence path, so asset-link events are still
-missing there too. Adding full discovery coverage is a follow-up that either
-routes those writes through the seam or calls the same enqueue hook directly; no
-change to the pipeline below is required.
+`digitaltwinregistryservice` (Registry API + Discovery API combined) is wired for
+eventing too: its AAS/Submodel descriptor writes emit `aas-descriptor`/
+`submodel-descriptor` events via the same seam as `aasregistryservice`, and — since
+it shares the same `internal/discoveryservice/persistence` code as the standalone
+`discoveryservice` — its asset-link writes automatically emit `asset-link` events
+as well, with no service-specific asset-link wiring needed.
+
+Discovery's asset-link CUD (`CreateAllAssetLinks`, `AddAllAssetLinks`,
+`DeleteAllAssetLinks`) emits `asset-link` events. Asset links are a lookup index,
+not a versioned Identifiable resource, so they are captured via
+`history.EmitMutationEventTx` — a version of `AppendVersionTx` with the
+PostgreSQL history/evidence branch removed — rather than `AppendVersionTx` itself,
+since they have no backing history table (`history.TableAssetLink` is
+eventing-only, see `internal/common/history/types.go`).
+
+Known limitation: the Registry-of-Infrastructures service does not route writes
+through the eventing seam today, so it is not yet covered. Adding it is a
+follow-up that either routes its writes through `history.AppendVersionTx` or
+calls `history.EmitMutationEventTx` directly; no change to the pipeline below is
+required.
+
+Discovery's asset-link CUD (`CreateAllAssetLinks`, `AddAllAssetLinks`,
+`DeleteAllAssetLinks`) now emits `asset-link` events too. Asset links are a
+lookup index, not a versioned Identifiable resource, so they are captured via
+the new `history.EmitMutationEventTx` — a version of `AppendVersionTx` with the
+PostgreSQL history/evidence branch removed — rather than `AppendVersionTx`
+itself, since they have no backing history table (`history.TableAssetLink` is
+eventing-only, see `internal/common/history/types.go`).
 
 ---
 

@@ -227,7 +227,7 @@ func insertAdministrationShellDescriptorDetailsTx(ctx context.Context, tx *sql.T
 
 	var aasRef sql.NullInt64
 	if cfg, ok := common.ConfigFromContext(ctx); ok && cfg.General.DiscoveryIntegration {
-		ref, err := ensureAASIdentifierTx(ctx, tx, aasd.Id)
+		ref, _, err := ensureAASIdentifierTx(ctx, tx, aasd.Id)
 		if err != nil {
 			return err
 		}
