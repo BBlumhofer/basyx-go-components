@@ -29,11 +29,21 @@ import (
 	"context"
 	"database/sql"
 	"strings"
+	"time"
 
 	"github.com/doug-martin/goqu/v9"
 
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 )
+
+// publishAttemptTimeout bounds one sink.Publish call. processEntity holds a
+// DB transaction and the entity's advisory lock for the duration of a
+// delivery attempt (required so a row is only marked published under the same
+// lock that guarantees per-entity ordering); an unresponsive broker must not
+// be able to wedge that transaction, the connection pool, or the dispatch
+// loop indefinitely. A timed-out attempt is treated like any other publish
+// failure and retried with the normal backoff on the next cycle.
+const publishAttemptTimeout = 15 * time.Second
 
 type outboxRow struct {
 	id           int64
@@ -203,7 +213,7 @@ func (r *Relay) publishToSinks(ctx context.Context, row outboxRow) ([]string, er
 			Body:         row.payload,
 			Headers:      map[string]string{"ce-id": row.eventID},
 		}
-		if err := sink.Publish(ctx, envelope); err != nil {
+		if err := publishWithTimeout(ctx, sink, envelope); err != nil {
 			remaining = append(remaining, name)
 			if firstErr == nil {
 				firstErr = err
@@ -211,6 +221,12 @@ func (r *Relay) publishToSinks(ctx context.Context, row outboxRow) ([]string, er
 		}
 	}
 	return remaining, firstErr
+}
+
+func publishWithTimeout(ctx context.Context, sink EventSink, envelope Envelope) error {
+	publishCtx, cancel := context.WithTimeout(ctx, publishAttemptTimeout)
+	defer cancel()
+	return sink.Publish(publishCtx, envelope)
 }
 
 func (r *Relay) sinkByName(name string) EventSink {
