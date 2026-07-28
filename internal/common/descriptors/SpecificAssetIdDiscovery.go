@@ -32,9 +32,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/FriedJannik/aas-go-sdk/jsonization"
 	"github.com/FriedJannik/aas-go-sdk/types"
 	"github.com/doug-martin/goqu/v9"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
+	"github.com/eclipse-basyx/basyx-go-components/internal/common/history"
 	"github.com/eclipse-basyx/basyx-go-components/internal/common/model/grammar"
 	auth "github.com/eclipse-basyx/basyx-go-components/internal/common/security"
 )
@@ -242,7 +244,7 @@ func ReplaceSpecificAssetIDsByAASIdentifier(
 	specificAssetIDs []types.ISpecificAssetID,
 ) error {
 	return WithTx(ctx, db, func(tx *sql.Tx) error {
-		aasRef, err := ensureAASIdentifierTx(ctx, tx, aasID)
+		aasRef, created, err := ensureAASIdentifierTx(ctx, tx, aasID)
 		if err != nil {
 			return err
 		}
@@ -250,13 +252,25 @@ func ReplaceSpecificAssetIDsByAASIdentifier(
 		if _, err := tx.ExecContext(ctx, `DELETE FROM specific_asset_id WHERE aasRef = $1`, aasRef); err != nil {
 			return err
 		}
-		return common.InsertSpecificAssetIDs(
+		if err := common.InsertSpecificAssetIDs(
 			tx,
 			sql.NullInt64{},
 			sql.NullInt64{},
 			sql.NullInt64{Int64: aasRef, Valid: true},
 			specificAssetIDs,
-		)
+		); err != nil {
+			return err
+		}
+
+		// A replace-all is a create the first time an AAS identifier appears in
+		// Discovery and an update on every subsequent call (ensureAASIdentifierTx
+		// reports which one happened via the ON CONFLICT xmax check), matching
+		// the create/update semantics used for every other in-scope resource.
+		changeType := history.ChangeUpdated
+		if created {
+			changeType = history.ChangeCreated
+		}
+		return emitAssetLinkMutationEventTx(ctx, tx, aasRef, aasID, changeType)
 	})
 }
 
@@ -273,7 +287,7 @@ func AddSpecificAssetIDsByAASIdentifier(
 			return nil
 		}
 
-		aasRef, err := ensureAASIdentifierTx(ctx, tx, aasID)
+		aasRef, _, err := ensureAASIdentifierTx(ctx, tx, aasID)
 		if err != nil {
 			return err
 		}
@@ -291,15 +305,55 @@ func AddSpecificAssetIDsByAASIdentifier(
 			return err
 		}
 
-		return common.InsertSpecificAssetIDsWithPositionStart(
+		if err := common.InsertSpecificAssetIDsWithPositionStart(
 			tx,
 			descriptorID,
 			sql.NullInt64{},
 			sql.NullInt64{Int64: aasRef, Valid: true},
 			specificAssetIDs,
 			positionStart,
-		)
+		); err != nil {
+			return err
+		}
+
+		// AddSpecificAssetIDsByAASIdentifier is always an incremental append onto
+		// an existing (or just-created-above) identifier, so it is always an
+		// update from the eventing point of view, even the very first time links
+		// are added for a given AAS identifier.
+		return emitAssetLinkMutationEventTx(ctx, tx, aasRef, aasID, history.ChangeUpdated)
 	})
+}
+
+// emitAssetLinkMutationEventTx captures the complete post-mutation set of
+// specific asset IDs for aasID and emits it through the eventing seam. It
+// re-reads the current set inside tx (rather than trusting the caller's input
+// slice) so both the replace-all and incremental-add call sites report the
+// same "complete persisted resource" shape the eventing pipeline expects.
+func emitAssetLinkMutationEventTx(ctx context.Context, tx *sql.Tx, aasRef int64, aasID string, changeType string) error {
+	links, err := ReadSpecificAssetIDsByAASRef(ctx, tx, aasRef)
+	if err != nil {
+		return err
+	}
+	snapshot, err := assetLinkSnapshot(aasID, links)
+	if err != nil {
+		return err
+	}
+	return history.EmitMutationEventTx(ctx, tx, history.TableAssetLink, aasID, changeType, snapshot, false)
+}
+
+// assetLinkSnapshot renders the AAS's complete specific asset ID set as the
+// JSON-serializable eventing payload, using the same per-element
+// jsonization.ToJsonable conversion the Discovery API responses already use.
+func assetLinkSnapshot(aasID string, links []types.ISpecificAssetID) (map[string]any, error) {
+	jsonableLinks := make([]map[string]any, 0, len(links))
+	for _, link := range links {
+		jsonableLink, err := jsonization.ToJsonable(link)
+		if err != nil {
+			return nil, err
+		}
+		jsonableLinks = append(jsonableLinks, jsonableLink)
+	}
+	return map[string]any{"aasId": aasID, "specificAssetIds": jsonableLinks}, nil
 }
 
 func descriptorIDForAASIDTx(ctx context.Context, tx *sql.Tx, aasID string) (sql.NullInt64, error) {
@@ -343,8 +397,14 @@ func nextSpecificAssetIDPositionByAASRefTx(ctx context.Context, tx *sql.Tx, aasR
 	return positionStart, nil
 }
 
-func ensureAASIdentifierTx(ctx context.Context, tx *sql.Tx, aasID string) (int64, error) {
+// ensureAASIdentifierTx upserts the discovery aas_identifier row for aasID and
+// reports whether that row was newly inserted (true) or already existed and
+// was only touched by the upsert (false). The `xmax = 0` check is the
+// standard PostgreSQL idiom for distinguishing an INSERT from an
+// ON CONFLICT DO UPDATE within a single RETURNING statement.
+func ensureAASIdentifierTx(ctx context.Context, tx *sql.Tx, aasID string) (int64, bool, error) {
 	var aasRef int64
+	var created bool
 	d := goqu.Dialect(common.Dialect)
 	tAASIdentifier := goqu.T(common.TblAASIdentifier)
 	sqlStr, args, err := d.
@@ -356,13 +416,13 @@ func ensureAASIdentifierTx(ctx context.Context, tx *sql.Tx, aasID string) (int64
 				goqu.Record{"aasid": goqu.I("excluded.aasid")},
 			),
 		).
-		Returning(tAASIdentifier.Col(common.ColID)).
+		Returning(tAASIdentifier.Col(common.ColID), goqu.L("(xmax = 0)")).
 		ToSQL()
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	if err := tx.QueryRowContext(ctx, sqlStr, args...).Scan(&aasRef); err != nil {
-		return 0, err
+	if err := tx.QueryRowContext(ctx, sqlStr, args...).Scan(&aasRef, &created); err != nil {
+		return 0, false, err
 	}
-	return aasRef, nil
+	return aasRef, created, nil
 }

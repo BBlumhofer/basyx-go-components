@@ -94,6 +94,57 @@ func AppendVersionTx(ctx context.Context, tx *sql.Tx, table string, identifier s
 	return emitMutationEventTx(ctx, tx, table, identifier, changeType, snapshot, deleted)
 }
 
+// EmitMutationEventTx captures one mutation for eventing only, without ever
+// writing PostgreSQL history or WORM evidence rows.
+//
+// AppendVersionTx is unsuitable for resources that have no backing history
+// table (for example Discovery's asset links, TableAssetLink): whenever an
+// operator has history.Mode != off or evidence enabled, AppendVersionTx would
+// try to append to that non-existent table and fail. EmitMutationEventTx is
+// the subset of AppendVersionTx with the recordHistory branch removed
+// entirely, so it is always safe to call regardless of the process-local
+// history configuration - it only takes the per-entity advisory lock (for the
+// same ordering guarantee AppendVersionTx gives history-backed mutations) and
+// invokes the registered eventing hook. It is a no-op, taking no lock, when no
+// eventing hook is registered.
+//
+// Parameters:
+//   - ctx: Request context. Audit metadata stored with ContextWithAudit is
+//     forwarded to the eventing hook.
+//   - tx: Active SQL transaction used for locking and the eventing hook.
+//   - table: Logical resource key, for example TableAssetLink. Does not need
+//     to be a real database table.
+//   - identifier: Stable entity identifier for per-entity lock/ordering.
+//   - changeType: ChangeCreated, ChangeUpdated, or ChangeDeleted.
+//   - snapshot: Complete entity snapshot after the mutation; ignored for
+//     deletions.
+//   - deleted: True when the mutation represents a deletion.
+//
+// Returns:
+//   - error: nil when no eventing hook is registered or the event was
+//     captured; otherwise a coded BaSyx error from input validation, locking,
+//     or the eventing hook itself.
+//
+// Example:
+//
+//	err := EmitMutationEventTx(ctx, tx, TableAssetLink, aasID, ChangeUpdated, snapshot, false)
+//	if err != nil {
+//		return err
+//	}
+func EmitMutationEventTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, snapshot map[string]any, deleted bool) error {
+	if !MutationEventHookActive() {
+		return nil
+	}
+	identifier, err := validateAppendInputs(tx, identifier)
+	if err != nil {
+		return err
+	}
+	if err = lockIdentifierTx(ctx, tx, table, identifier); err != nil {
+		return err
+	}
+	return emitMutationEventTx(ctx, tx, table, identifier, changeType, snapshot, deleted)
+}
+
 func appendVersionRecordTx(ctx context.Context, tx *sql.Tx, table string, identifier string, changeType string, previousSnapshot map[string]any, snapshot map[string]any, deleted bool, cfg Config) error {
 	if cfg.EvidenceEnabled {
 		return appendVersionWithEvidenceTx(ctx, tx, table, identifier, changeType, previousSnapshot, snapshot, deleted, cfg)

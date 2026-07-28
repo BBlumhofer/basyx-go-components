@@ -64,6 +64,15 @@ const (
 	TableSubmodelDescriptor = "submodel_descriptor_history"
 	// TableGuardConfig stores the runtime switch for PostgreSQL history guards.
 	TableGuardConfig = "history_guard_config"
+	// TableAssetLink identifies Discovery asset-link mutations for eventing only.
+	//
+	// Asset links are a lookup index, not a versioned Identifiable resource, so
+	// this constant intentionally has no backing PostgreSQL history table and is
+	// absent from payloadTables. Pass it only to EmitMutationEventTx, never to
+	// AppendVersionTx/AppendMutatedVersionTx: those would try to write history or
+	// evidence rows to a table that does not exist whenever history.Mode != off
+	// or evidence is enabled.
+	TableAssetLink = "asset_link"
 
 	// ChangeCreated marks a created entity version.
 	ChangeCreated = "Created"

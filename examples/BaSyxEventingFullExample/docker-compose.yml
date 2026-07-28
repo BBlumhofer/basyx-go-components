@@ -8,7 +8,10 @@
 #     aas, submodel, aas-descriptor, and submodel-descriptor events.
 #   - aas-registry / submodel-registry: standalone registry APIs over the shared
 #     database; eventing is enabled so direct descriptor writes also emit events.
-#   - aas-discovery: asset-link discovery API (eventing not yet supported here).
+#   - aas-discovery: asset-link discovery API; eventing is enabled so asset-link
+#     create/add/delete calls also emit events.
+#   - digital-twin-registry: combined AAS Registry + Discovery API over the same
+#     database; eventing is enabled for both its descriptor and asset-link writes.
 #   - Mosquitto (MQTT) and Redpanda (Kafka) brokers, PostgreSQL, and the
 #     configuration service (installs the schema incl. outbox patch v1.2.0).
 #
@@ -224,7 +227,55 @@ services:
       - POSTGRES_PASSWORD=admin123
       - POSTGRES_DBNAME=basyxTestDB
       - ABAC_ENABLED=false
+      - BASYX_EVENTING_ENABLED=true
+      - BASYX_EVENTING_OUTBOX_ENABLED=true
+      - BASYX_EVENTING_FORMAT=cloudevents
+      - BASYX_EVENTING_TOPIC_PREFIX=basyx
+      - BASYX_EVENTING_SINKS=mqtt,kafka
+      - BASYX_EVENTING_MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - BASYX_EVENTING_MQTT_CLIENT_ID=basyx-aas-discovery
+      - BASYX_EVENTING_KAFKA_BROKERS=redpanda:9092
+      - BASYX_EVENTING_KAFKA_TOPIC=basyx.events
     depends_on:
       basyx_configuration:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  digital-twin-registry:
+    container_name: eventing_full_digital_twin_registry
+    image: ghcr.io/${IMAGE_OWNER:-bblumhofer}/basyx-digitaltwinregistry-go:${IMAGE_TAG:-eventing}
+    pull_policy: always
+    ports:
+      - "8085:8085"
+    environment:
+      - SERVER_PORT=8085
+      - CORS_ALLOWEDORIGINS=*
+      - CORS_ALLOWEDHEADERS=*
+      - CORS_ALLOWEDMETHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+      - POSTGRES_HOST=db
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=admin123
+      - POSTGRES_DBNAME=basyxTestDB
+      - ABAC_ENABLED=false
+      - BASYX_EVENTING_ENABLED=true
+      - BASYX_EVENTING_OUTBOX_ENABLED=true
+      - BASYX_EVENTING_FORMAT=cloudevents
+      - BASYX_EVENTING_TOPIC_PREFIX=basyx
+      - BASYX_EVENTING_SINKS=mqtt,kafka
+      - BASYX_EVENTING_MQTT_BROKER_URL=mqtt://mosquitto:1883
+      - BASYX_EVENTING_MQTT_CLIENT_ID=basyx-digital-twin-registry
+      - BASYX_EVENTING_KAFKA_BROKERS=redpanda:9092
+      - BASYX_EVENTING_KAFKA_TOPIC=basyx.events
+    depends_on:
+      basyx_configuration:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+      redpanda-init:
         condition: service_completed_successfully
     restart: unless-stopped

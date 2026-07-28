@@ -80,6 +80,47 @@ func startEmbeddedMQTT(t *testing.T) (string, chan []byte) {
 	return address, received
 }
 
+// TestSinkConstructionSurvivesUnreachableBrokerAtStartup guards against a
+// regression observed running the multi-service eventing example: several
+// services connecting to a broker at the same time occasionally missed the
+// original hard 10s AwaitConnection/Ping deadline and crashed the entire
+// service (EVENTING-MQTT-AWAIT / EVENTING-KAFKA-PING). Sink construction must
+// never fail just because the broker isn't reachable yet at startup - the
+// underlying client keeps retrying in the background, exactly like an
+// in-flight publish failure does after startup.
+func TestSinkConstructionSurvivesUnreachableBrokerAtStartup(t *testing.T) {
+	previousMQTTGrace := mqttInitialConnectGrace
+	previousKafkaGrace := kafkaInitialPingGrace
+	mqttInitialConnectGrace = 200 * time.Millisecond
+	kafkaInitialPingGrace = 200 * time.Millisecond
+	t.Cleanup(func() {
+		mqttInitialConnectGrace = previousMQTTGrace
+		kafkaInitialPingGrace = previousKafkaGrace
+	})
+
+	unreachable := freeTCPAddress(t) // reserved, then closed - nothing listens here
+	ctx := context.Background()
+
+	mqttSink, err := newMQTTSink(ctx, common.EventingMQTTConfig{
+		BrokerURL: "mqtt://" + unreachable,
+		ClientID:  "basyx-unreachable-test",
+		QoS:       1,
+	})
+	if err != nil {
+		t.Fatalf("newMQTTSink must not fail when the broker is unreachable at startup, got: %v", err)
+	}
+	t.Cleanup(func() { _ = mqttSink.Close(ctx) })
+
+	kSink, err := newKafkaSink(ctx, common.EventingKafkaConfig{
+		Brokers: []string{unreachable},
+		Topic:   "basyx.events",
+	})
+	if err != nil {
+		t.Fatalf("newKafkaSink must not fail when the broker is unreachable at startup, got: %v", err)
+	}
+	t.Cleanup(func() { _ = kSink.Close(ctx) })
+}
+
 func TestMQTTSinkPublishesToEmbeddedBroker(t *testing.T) {
 	address, received := startEmbeddedMQTT(t)
 	ctx := context.Background()

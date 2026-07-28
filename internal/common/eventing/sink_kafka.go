@@ -27,7 +27,9 @@ package eventing
 
 import (
 	"context"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/twmb/franz-go/pkg/kgo"
 
@@ -35,6 +37,13 @@ import (
 )
 
 const kafkaSinkName = "kafka"
+
+// kafkaInitialPingGrace bounds the startup reachability check, mirroring
+// mqttInitialConnectGrace: a slow or momentarily unavailable broker at boot
+// never blocks or fails the owning service. franz-go's client retries
+// internally on subsequent Produce calls regardless of this check's outcome.
+// A var (not const) so tests can shorten it.
+var kafkaInitialPingGrace = 10 * time.Second
 
 type kafkaSink struct {
 	client            *kgo.Client
@@ -51,9 +60,10 @@ func newKafkaSink(ctx context.Context, cfg common.EventingKafkaConfig) (*kafkaSi
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-KAFKA-CLIENT " + err.Error())
 	}
-	if err = client.Ping(ctx); err != nil {
-		client.Close()
-		return nil, common.NewErrServiceUnavailable("EVENTING-KAFKA-PING " + err.Error())
+	pingCtx, cancel := context.WithTimeout(ctx, kafkaInitialPingGrace)
+	defer cancel()
+	if err = client.Ping(pingCtx); err != nil {
+		log.Printf("EVENTING-KAFKA-PING broker not reachable within %s, continuing startup; the client keeps retrying in the background: %v", kafkaInitialPingGrace, err)
 	}
 	return &kafkaSink{client: client, topic: cfg.Topic, topicPerComponent: cfg.TopicPerComponent}, nil
 }

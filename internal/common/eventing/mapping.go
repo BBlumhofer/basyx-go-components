@@ -56,6 +56,7 @@ var resourceForTable = map[string]string{
 	history.TableConcept:            "concept-description",
 	history.TableDescriptor:         "aas-descriptor",
 	history.TableSubmodelDescriptor: "submodel-descriptor",
+	history.TableAssetLink:          "asset-link",
 }
 
 // ResourceForTable returns the eventing resource name for a history table.

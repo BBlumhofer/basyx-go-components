@@ -27,6 +27,7 @@ package eventing
 
 import (
 	"context"
+	"log"
 	"net/url"
 	"time"
 
@@ -35,6 +36,15 @@ import (
 
 	"github.com/eclipse-basyx/basyx-go-components/internal/common"
 )
+
+// mqttInitialConnectGrace bounds how long sink construction waits for the
+// first MQTT connection before giving up and returning control to the caller.
+// It is a startup nicety only: autopaho keeps retrying in the background
+// afterward, so a slow or momentarily unavailable broker at boot never blocks
+// or fails the owning service - consistent with the rest of the eventing
+// design, where broker unavailability is absorbed by retry, never surfaced as
+// a request/startup failure. A var (not const) so tests can shorten it.
+var mqttInitialConnectGrace = 10 * time.Second
 
 const mqttSinkName = "mqtt"
 
@@ -67,10 +77,10 @@ func newMQTTSink(ctx context.Context, cfg common.EventingMQTTConfig) (*mqttSink,
 	if err != nil {
 		return nil, common.NewInternalServerError("EVENTING-MQTT-CONNECT " + err.Error())
 	}
-	awaitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	awaitCtx, cancel := context.WithTimeout(ctx, mqttInitialConnectGrace)
 	defer cancel()
 	if err = manager.AwaitConnection(awaitCtx); err != nil {
-		return nil, common.NewInternalServerError("EVENTING-MQTT-AWAIT " + err.Error())
+		log.Printf("EVENTING-MQTT-AWAIT broker not reachable within %s, continuing startup; autopaho keeps retrying in the background: %v", mqttInitialConnectGrace, err)
 	}
 	qos := byte(cfg.QoS) //nolint:gosec // QoS is validated to 0..2 in configuration
 	return &mqttSink{manager: manager, qos: qos, retained: cfg.Retained}, nil
